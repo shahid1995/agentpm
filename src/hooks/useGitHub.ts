@@ -17,16 +17,14 @@ export interface GitHubIssue {
 }
 
 export interface GitHubConfig {
-  repo: string; // "username/repo"
+  repo: string;
   token: string;
   openaiKey?: string;
 }
 
-const GITHUB_CONFIG_KEY = "agentpm-github-config";
-const OPENAI_KEY_KEY = "agentpm-openai-key";
-
 /**
  * Custom hook for fetching and managing GitHub Issues.
+ * Credentials are stored server-side (PostgreSQL), not in localStorage.
  */
 export function useGitHub() {
   const [config, setConfig] = React.useState<GitHubConfig | null>(null);
@@ -35,41 +33,81 @@ export function useGitHub() {
   const [error, setError] = React.useState<string | null>(null);
   const [isLoaded, setIsLoaded] = React.useState(false);
 
-  // Load config from localStorage on mount
+  // Load credentials from server-side API on mount
   React.useEffect(() => {
-    try {
-      const stored = localStorage.getItem(GITHUB_CONFIG_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed.repo && parsed.token) {
-          setConfig(parsed);
+    const loadCredentials = async () => {
+      try {
+        const response = await fetch("/api/credentials");
+        if (response.ok) {
+          const data = await response.json();
+          if (data.data?.credentials?.length > 0) {
+            const githubCred = data.data.credentials.find(
+              (c: { provider: string }) => c.provider === "github"
+            );
+            if (githubCred) {
+              setConfig({
+                repo: "",
+                token: "",
+                openaiKey: "",
+              });
+            }
+          }
         }
+      } catch {
+        // ignore
       }
+      setIsLoaded(true);
+    };
+    loadCredentials();
+  }, []);
+
+  // Save credentials to server-side API
+  const saveConfig = React.useCallback(async (newConfig: GitHubConfig) => {
+    try {
+      // Store GitHub token
+      if (newConfig.token) {
+        await fetch("/api/credentials", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider: "github",
+            value: newConfig.token,
+          }),
+        });
+      }
+      // Store OpenAI token
+      if (newConfig.openaiKey) {
+        await fetch("/api/credentials", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider: "openai",
+            value: newConfig.openaiKey,
+          }),
+        });
+      }
+      setConfig(newConfig);
+    } catch (err) {
+      console.error("[AgentPM] Failed to save credentials:", err);
+    }
+  }, []);
+
+  const clearConfig = React.useCallback(async () => {
+    try {
+      // Clear credentials from server
+      await fetch("/api/credentials", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+      });
     } catch {
       // ignore
     }
-    setIsLoaded(true);
-  }, []);
-
-  // Save config to localStorage
-  const saveConfig = React.useCallback((newConfig: GitHubConfig) => {
-    localStorage.setItem(GITHUB_CONFIG_KEY, JSON.stringify(newConfig));
-    setConfig(newConfig);
-  }, []);
-
-  const clearConfig = React.useCallback(() => {
-    localStorage.removeItem(GITHUB_CONFIG_KEY);
-    // Preserve OpenAI key if it exists
-    const openaiKey = localStorage.getItem(OPENAI_KEY_KEY);
     setConfig(null);
     setIssues([]);
     setError(null);
-    if (openaiKey) {
-      setConfig({ repo: "", token: "", openaiKey });
-    }
   }, []);
 
-  // Fetch issues from local API proxy (avoids CORS)
+  // Fetch issues from local API proxy
   const fetchIssues = React.useCallback(async () => {
     if (!config?.repo || !config?.token) return;
 
@@ -77,8 +115,6 @@ export function useGitHub() {
     setError(null);
 
     try {
-      console.log(`[AgentPM] Fetching issues via proxy for: ${config.repo}`);
-
       const response = await fetch("/api/github/issues", {
         method: "POST",
         headers: {
@@ -90,8 +126,6 @@ export function useGitHub() {
         }),
       });
 
-      console.log(`[AgentPM] Proxy response status: ${response.status}`);
-
       const data = await response.json();
 
       if (!response.ok) {
@@ -99,7 +133,6 @@ export function useGitHub() {
         throw new Error(errMsg);
       }
       setIssues(data.issues || []);
-      console.log(`[AgentPM] Fetched ${data.issues?.length || 0} issues`);
     } catch (err) {
       console.error("[AgentPM] Fetch error:", err);
       if (err instanceof TypeError && err.message === "Failed to fetch") {

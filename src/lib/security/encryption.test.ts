@@ -39,14 +39,14 @@ describe("EncryptionService", () => {
   });
 
   describe("key validation", () => {
-    it("should throw if ENCRYPTION_KEY is missing", () => {
+    it("should throw if ENCRYPTION_KEY is missing on encrypt", () => {
       delete process.env.ENCRYPTION_KEY;
-      expect(() => new EncryptionService()).toThrow("ENCRYPTION_KEY");
+      expect(() => service.encrypt("test")).toThrow("ENCRYPTION_KEY");
     });
 
-    it("should throw if ENCRYPTION_KEY is wrong length", () => {
+    it("should throw if ENCRYPTION_KEY is wrong length on encrypt", () => {
       process.env.ENCRYPTION_KEY = "tooshort";
-      expect(() => new EncryptionService()).toThrow("32 bytes");
+      expect(() => service.encrypt("test")).toThrow("32 bytes");
     });
   });
 

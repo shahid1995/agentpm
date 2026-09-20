@@ -7,9 +7,15 @@ export interface EncryptedData {
 }
 
 export class EncryptionService {
-  private key: Buffer;
+  private key: Buffer | null = null;
 
-  constructor() {
+  /**
+   * Get or initialize the encryption key.
+   * Deferred to first use to avoid build-time errors.
+   */
+  private getKey(): Buffer {
+    if (this.key) return this.key;
+
     const keyHex = process.env.ENCRYPTION_KEY;
     if (!keyHex) {
       throw new Error("ENCRYPTION_KEY environment variable is required");
@@ -18,11 +24,13 @@ export class EncryptionService {
       throw new Error("ENCRYPTION_KEY must be 32 bytes (64 hex characters)");
     }
     this.key = Buffer.from(keyHex, "hex");
+    return this.key;
   }
 
   encrypt(plaintext: string): EncryptedData {
+    const key = this.getKey();
     const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv("aes-256-gcm", this.key, iv);
+    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
 
     let ciphertext = cipher.update(plaintext, "utf8", "hex");
     ciphertext += cipher.final("hex");
@@ -37,9 +45,10 @@ export class EncryptionService {
   }
 
   decrypt(encrypted: EncryptedData): string {
+    const key = this.getKey();
     const decipher = crypto.createDecipheriv(
       "aes-256-gcm",
-      this.key,
+      key,
       Buffer.from(encrypted.iv, "hex")
     );
     decipher.setAuthTag(Buffer.from(encrypted.authTag, "hex"));
