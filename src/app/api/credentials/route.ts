@@ -127,7 +127,11 @@ export async function DELETE(request: NextRequest): Promise<Response> {
     }
 
     const { credentialId } = result.data;
-    await getCredentialService().deleteCredential(credentialId, user.userId);
+    const deleted = await getCredentialService().deleteCredential(credentialId, user.userId);
+
+    if (!deleted) {
+      throw new ApiError("NOT_FOUND", "Credential not found");
+    }
 
     return NextResponse.json(successResponse(null, { message: "Credential deleted" }));
   } catch (error) {

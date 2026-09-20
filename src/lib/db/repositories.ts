@@ -153,7 +153,7 @@ export async function getEncryptedCredentialById(
       authTag: encryptedCredentials.authTag,
     })
     .from(encryptedCredentials)
-    .where(eq(encryptedCredentials.id, credentialId))
+    .where(and(eq(encryptedCredentials.id, credentialId), eq(encryptedCredentials.userId, userId)))
     .limit(1);
   return cred || null;
 }
@@ -182,7 +182,7 @@ export async function deleteEncryptedCredential(
   const db = getDb();
   await db
     .delete(encryptedCredentials)
-    .where(eq(encryptedCredentials.id, credentialId));
+    .where(and(eq(encryptedCredentials.id, credentialId), eq(encryptedCredentials.userId, userId)));
 }
 
 // Project repository functions

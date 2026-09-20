@@ -101,9 +101,13 @@ export class CredentialService {
   }
 
   /**
-   * Delete a credential.
+   * Delete a credential. Returns false when no matching credential
+   * exists for this user (id nonexistent or owned by another user).
    */
-  async deleteCredential(credentialId: string, userId: string): Promise<void> {
+  async deleteCredential(credentialId: string, userId: string): Promise<boolean> {
+    const existing = await getEncryptedCredentialById(credentialId, userId);
+    if (!existing) return false;
     await deleteEncryptedCredential(credentialId, userId);
+    return true;
   }
 }
