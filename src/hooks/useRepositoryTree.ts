@@ -44,17 +44,18 @@ export function useRepositoryTree(
         let errorMsg = `API error: ${response.status}`;
         try {
           const errBody = await response.json();
-          if (errBody.error) errorMsg = errBody.error;
+          if (errBody?.error?.message) errorMsg = errBody.error.message;
         } catch {
           // ignore
         }
         throw new Error(errorMsg);
       }
 
-      const data: GitHubTreeResponse = await response.json();
-      const treeData = buildTreeFromGitHubResponse(data.tree, activeBoundaries);
+      const json = await response.json();
+      const data = json?.data;
+      const treeData = buildTreeFromGitHubResponse(data.tree || [], activeBoundaries);
       setTree(treeData);
-      setBranch(data.branch);
+      setBranch(data.branch || null);
     } catch (err) {
       console.error("[AgentPM] Repository tree error:", err);
       setError(err instanceof Error ? err.message : "Failed to fetch repository tree");

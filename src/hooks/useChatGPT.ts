@@ -72,7 +72,7 @@ export function useChatGPT(taskContext: TaskContext | null) {
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: data.message || "No response",
+        content: data?.data?.message || "No response",
         timestamp: Date.now(),
       };
 

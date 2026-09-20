@@ -65,10 +65,10 @@ export function useGitHub() {
       const data = await response.json();
 
       if (!response.ok) {
-        const errMsg = data.error || `API error: ${response.status}`;
+        const errMsg = data?.error?.message || `API error: ${response.status}`;
         throw new Error(errMsg);
       }
-      setIssues(data.issues || []);
+      setIssues(data?.data?.issues || []);
     } catch (err) {
       console.error("[AgentPM] Fetch error:", err);
       if (err instanceof TypeError && err.message === "Failed to fetch") {

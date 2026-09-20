@@ -56,6 +56,37 @@ export const deleteCredentialSchema = z.object({
   credentialId: z.string().uuid(),
 });
 
+// Provider (integration) request schemas
+export const chatgptRequestSchema = z.object({
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant"]),
+        content: z.string().min(1).max(32000),
+      })
+    )
+    .min(1)
+    .max(50),
+  taskContext: z
+    .object({
+      title: z.string().max(200).optional(),
+      description: z.string().max(5000).optional(),
+      contextBoundary: z.string().max(200).optional(),
+      columnId: z.string().max(100).optional(),
+    })
+    .nullable()
+    .optional(),
+});
+
+export const githubIssuesRequestSchema = z.object({
+  repo: z.string().min(1).max(200),
+});
+
+export const githubTreeRequestSchema = z.object({
+  repo: z.string().min(1).max(200),
+  branch: z.string().max(200).optional(),
+});
+
 export const getCredentialSchema = z.object({
   credentialId: z.string().uuid(),
 });

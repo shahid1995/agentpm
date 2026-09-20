@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { successResponse, errorResponse, ApiError } from "../../../../lib/api/api-contract";
+import { githubIssuesRequestSchema } from "../../../../lib/api/schemas";
+import {
+  authenticate,
+  enforceRateLimit,
+  enforceRequestSize,
+} from "../../../../lib/api/security";
 import { CredentialService } from "../../../../lib/services/credential-service";
-import { AuthService } from "../../../../lib/services/auth-service";
-import { extractSessionToken } from "../../../../lib/api/cookies";
 
 let credentialService: CredentialService | null = null;
-let authService: AuthService | null = null;
 
 function getCredentialService(): CredentialService {
   if (!credentialService) {
@@ -14,42 +17,20 @@ function getCredentialService(): CredentialService {
   return credentialService;
 }
 
-function getAuthService(): AuthService {
-  if (!authService) {
-    authService = new AuthService();
-  }
-  return authService;
-}
-
-async function getAuthenticatedUser(request: NextRequest): Promise<{ userId: string; email: string }> {
-  const cookieHeader = request.headers.get("cookie");
-  const sessionToken = extractSessionToken(cookieHeader);
-
-  if (!sessionToken) {
-    throw new ApiError("UNAUTHORIZED", "Authentication required");
-  }
-
-  const session = await getAuthService().resolveSession(sessionToken);
-  if (!session) {
-    throw new ApiError("UNAUTHORIZED", "Invalid session");
-  }
-
-  return { userId: session.userId, email: session.email };
-}
-
 export async function POST(request: NextRequest): Promise<Response> {
   try {
-    const user = await getAuthenticatedUser(request);
+    // Phase 1 security boundary: auth → rate limit → size → validation
+    const user = await authenticate(request);
+    enforceRateLimit(`github-issues:${user.userId}`, "api");
+    enforceRequestSize(request);
 
     const body = await request.json();
-    const { repo } = body;
-
-    if (!repo) {
-      throw new ApiError("VALIDATION_ERROR", "Missing repo parameter");
+    const result = githubIssuesRequestSchema.safeParse(body);
+    if (!result.success) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid request", result.error.flatten());
     }
 
-    // Validate repo format
-    const rawRepo = repo.trim();
+    const rawRepo = result.data.repo.trim();
     if (!rawRepo.includes("/") || rawRepo.startsWith("/") || rawRepo.endsWith("/")) {
       throw new ApiError("VALIDATION_ERROR", "Invalid format: use 'owner/repo'");
     }

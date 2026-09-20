@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ApiError } from "../../../lib/api/api-contract";
+import { successResponse, errorResponse, ApiError } from "../../../lib/api/api-contract";
+import { chatgptRequestSchema } from "../../../lib/api/schemas";
+import {
+  authenticate,
+  enforceRateLimit,
+  enforceRequestSize,
+} from "../../../lib/api/security";
 import { CredentialService } from "../../../lib/services/credential-service";
-import { AuthService } from "../../../lib/services/auth-service";
-import { extractSessionToken } from "../../../lib/api/cookies";
 
 let credentialService: CredentialService | null = null;
-let authService: AuthService | null = null;
 
 function getCredentialService(): CredentialService {
   if (!credentialService) {
@@ -14,39 +17,20 @@ function getCredentialService(): CredentialService {
   return credentialService;
 }
 
-function getAuthService(): AuthService {
-  if (!authService) {
-    authService = new AuthService();
-  }
-  return authService;
-}
-
-async function getAuthenticatedUser(request: NextRequest): Promise<{ userId: string; email: string }> {
-  const cookieHeader = request.headers.get("cookie");
-  const sessionToken = extractSessionToken(cookieHeader);
-
-  if (!sessionToken) {
-    throw new ApiError("UNAUTHORIZED", "Authentication required");
-  }
-
-  const session = await getAuthService().resolveSession(sessionToken);
-  if (!session) {
-    throw new ApiError("UNAUTHORIZED", "Invalid session");
-  }
-
-  return { userId: session.userId, email: session.email };
-}
-
 export async function POST(request: NextRequest): Promise<Response> {
   try {
-    const user = await getAuthenticatedUser(request);
+    // Phase 1 security boundary: auth → rate limit → size → validation
+    const user = await authenticate(request);
+    enforceRateLimit(`chatgpt:${user.userId}`, "sensitive");
+    enforceRequestSize(request);
 
     const body = await request.json();
-    const { messages, taskContext } = body;
-
-    if (!messages || !Array.isArray(messages)) {
-      throw new ApiError("VALIDATION_ERROR", "Invalid messages format");
+    const result = chatgptRequestSchema.safeParse(body);
+    if (!result.success) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid request", result.error.flatten());
     }
+
+    const { messages, taskContext } = result.data;
 
     // Resolve OpenAI key from server-side encrypted credential
     const apiKey = await getCredentialService().getDecryptedCredential(user.userId, "openai");
@@ -114,14 +98,14 @@ Column: ${taskContext.columnId || "Unknown"}` : "No task selected"}
     const data = await response.json();
     const assistantMessage = data.choices?.[0]?.message?.content || "";
 
-    return NextResponse.json({ message: assistantMessage });
+    return NextResponse.json(successResponse({ message: assistantMessage }));
   } catch (error) {
     if (error instanceof ApiError) {
       return error.toResponse();
     }
     console.error("[AgentPM API] ChatGPT proxy error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      errorResponse("INTERNAL_ERROR", "Failed to get AI response"),
       { status: 500 }
     );
   }
