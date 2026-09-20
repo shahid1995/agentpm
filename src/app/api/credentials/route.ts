@@ -38,7 +38,7 @@ async function getAuthenticatedUser(request: NextRequest): Promise<{ userId: str
     throw new ApiError("UNAUTHORIZED", "Invalid session");
   }
 
-  return { userId: session.user.id, email: session.user.email };
+  return { userId: session.userId, email: session.email };
 }
 
 function checkCsrf(request: NextRequest): void {

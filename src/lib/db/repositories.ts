@@ -4,9 +4,26 @@ import {
   users,
   sessions,
   encryptedCredentials,
-  type User,
-  type Session,
 } from "../db/schema";
+
+export interface User {
+  id: string;
+  email: string;
+  passwordHash: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Session {
+  id: string;
+  userId: string;
+  sessionTokenHash: string;
+  createdAt: Date;
+  expiresAt: Date;
+  lastSeenAt?: Date | null;
+  revokedAt?: Date | null;
+  metadata?: unknown;
+}
 
 export async function createUser(email: string, passwordHash: string): Promise<User> {
   const db = getDb();
@@ -94,7 +111,7 @@ export async function saveEncryptedCredential(
   const db = getDb();
   await db.insert(encryptedCredentials).values({
     userId,
-    provider,
+    provider: provider as "github" | "openai",
     ciphertext,
     iv,
     authTag,

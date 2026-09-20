@@ -79,7 +79,11 @@ export class CredentialService {
    * Get all credentials for a user (metadata only, no values).
    */
   async getCredentials(userId: string): Promise<CredentialMetadata[]> {
-    return getEncryptedCredentials(userId);
+    const creds = await getEncryptedCredentials(userId);
+    return creds.map((c) => ({
+      ...c,
+      provider: c.provider as "github" | "openai",
+    }));
   }
 
   /**

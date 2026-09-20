@@ -8,10 +8,14 @@ import {
   revokeSession,
   revokeAllUserSessions,
 } from "../db/repositories";
-import type { User, Session } from "../db/schema";
+
+export interface AuthUser {
+  id: string;
+  email: string;
+}
 
 export interface AuthResult {
-  user: { id: string; email: string };
+  user: AuthUser;
   sessionToken: string;
 }
 
@@ -125,7 +129,7 @@ export class AuthService {
   /**
    * Get user by ID.
    */
-  async getUserById(userId: string): Promise<{ id: string; email: string } | null> {
+  async getUserById(userId: string): Promise<AuthUser | null> {
     const user = await findUserById(userId);
     if (!user) return null;
     return { id: user.id, email: user.email };
