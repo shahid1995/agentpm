@@ -39,7 +39,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     const user = await authenticate(request);
     // Repository trees are expensive (recursive GitHub API call)
     enforceRateLimit(`github-tree:${user.userId}`, "sensitive");
-    enforceRequestSize(request);
+    await enforceRequestSize(request);
 
     const body = await request.json();
     const result = githubTreeRequestSchema.safeParse(body);

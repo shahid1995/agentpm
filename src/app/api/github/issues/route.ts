@@ -22,7 +22,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     // Phase 1 security boundary: auth → rate limit → size → validation
     const user = await authenticate(request);
     enforceRateLimit(`github-issues:${user.userId}`, "api");
-    enforceRequestSize(request);
+    await enforceRequestSize(request);
 
     const body = await request.json();
     const result = githubIssuesRequestSchema.safeParse(body);

@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { successResponse, errorResponse, ApiError } from "../../../lib/api/api-contract";
 import { storeCredentialSchema, deleteCredentialSchema } from "../../../lib/api/schemas";
+import {
+  authenticate,
+  enforceRateLimit,
+  enforceCsrf,
+  enforceRequestSize,
+} from "../../../lib/api/security";
 import { CredentialService } from "../../../lib/services/credential-service";
-import { AuthService } from "../../../lib/services/auth-service";
-import { extractSessionToken } from "../../../lib/api/cookies";
-import { extractCsrfToken } from "../../../lib/api/middleware";
-import { validateCsrfToken } from "../../../lib/security/csrf";
 
 // Lazy instantiation — services created on first request, not at build time
 let credentialService: CredentialService | null = null;
-let authService: AuthService | null = null;
 
 function getCredentialService(): CredentialService {
   if (!credentialService) {
@@ -18,51 +19,14 @@ function getCredentialService(): CredentialService {
   return credentialService;
 }
 
-function getAuthService(): AuthService {
-  if (!authService) {
-    authService = new AuthService();
-  }
-  return authService;
-}
-
-async function getAuthenticatedUser(request: NextRequest): Promise<{ userId: string; email: string }> {
-  const cookieHeader = request.headers.get("cookie");
-  const sessionToken = extractSessionToken(cookieHeader);
-
-  if (!sessionToken) {
-    throw new ApiError("UNAUTHORIZED", "Authentication required");
-  }
-
-  const session = await getAuthService().resolveSession(sessionToken);
-  if (!session) {
-    throw new ApiError("UNAUTHORIZED", "Invalid session");
-  }
-
-  return { userId: session.userId, email: session.email };
-}
-
-function checkCsrf(request: NextRequest): void {
-  const headerToken = request.headers.get("x-csrf-token");
-  const cookieToken = extractCsrfToken(request.headers.get("cookie"));
-
-  if (!headerToken || !cookieToken) {
-    throw new ApiError("FORBIDDEN", "CSRF token missing");
-  }
-
-  if (!validateCsrfToken(headerToken, cookieToken)) {
-    throw new ApiError("FORBIDDEN", "Invalid CSRF token");
-  }
-}
-
 export async function POST(request: NextRequest): Promise<Response> {
   try {
-    const user = await getAuthenticatedUser(request);
-    checkCsrf(request);
-
-    const contentLength = request.headers.get("content-length");
-    if (contentLength && parseInt(contentLength) > 1024 * 1024) {
-      throw new ApiError("VALIDATION_ERROR", "Request too large");
-    }
+    // Phase 1 security boundary: auth → rate-limit → CSRF → size → validation
+    const user = await authenticate(request);
+    // Credential writes handle secrets — use the sensitive tier (10/min)
+    enforceRateLimit(`credentials:${user.userId}`, "sensitive");
+    enforceCsrf(request);
+    await enforceRequestSize(request);
 
     const body = await request.json();
     const result = storeCredentialSchema.safeParse(body);
@@ -93,7 +57,9 @@ export async function POST(request: NextRequest): Promise<Response> {
 
 export async function GET(request: NextRequest): Promise<Response> {
   try {
-    const user = await getAuthenticatedUser(request);
+    // Phase 1 security boundary: auth → rate-limit → validation
+    const user = await authenticate(request);
+    enforceRateLimit(`credentials:${user.userId}`, "sensitive");
 
     // Query persisted credentials from PostgreSQL
     const credentials = await getCredentialService().getCredentials(user.userId);
@@ -103,6 +69,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     if (error instanceof ApiError) {
       return error.toResponse();
     }
+    console.error("Credential fetch error:", error);
     return NextResponse.json(
       errorResponse("INTERNAL_ERROR", "Failed to fetch credentials"),
       { status: 500 }
@@ -112,13 +79,11 @@ export async function GET(request: NextRequest): Promise<Response> {
 
 export async function DELETE(request: NextRequest): Promise<Response> {
   try {
-    const user = await getAuthenticatedUser(request);
-    checkCsrf(request);
-
-    const contentLength = request.headers.get("content-length");
-    if (contentLength && parseInt(contentLength) > 1024 * 1024) {
-      throw new ApiError("VALIDATION_ERROR", "Request too large");
-    }
+    // Phase 1 security boundary: auth → rate-limit → CSRF → size → validation
+    const user = await authenticate(request);
+    enforceRateLimit(`credentials:${user.userId}`, "sensitive");
+    enforceCsrf(request);
+    await enforceRequestSize(request);
 
     const body = await request.json();
     const result = deleteCredentialSchema.safeParse(body);
@@ -138,6 +103,7 @@ export async function DELETE(request: NextRequest): Promise<Response> {
     if (error instanceof ApiError) {
       return error.toResponse();
     }
+    console.error("Credential deletion error:", error);
     return NextResponse.json(
       errorResponse("INTERNAL_ERROR", "Failed to delete credential"),
       { status: 500 }

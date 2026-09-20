@@ -87,11 +87,27 @@ export function enforceCsrf(request: NextRequest): void {
 }
 
 /**
- * Enforce request size limit.
+ * Enforce the 1 MiB request-body limit.
+ *
+ * Boundary: an explicitly declared oversized Content-Length is rejected
+ * immediately. The authoritative check measures the actual body via a
+ * clone, so the route can still read the original body afterwards. This
+ * covers absent, unparseable, or understated Content-Length values.
  */
-export function enforceRequestSize(request: NextRequest): void {
+export async function enforceRequestSize(request: NextRequest): Promise<void> {
+  // Fast path: early rejection when an oversized Content-Length is declared.
   const contentLength = request.headers.get("content-length");
-  if (contentLength && parseInt(contentLength) > MAX_REQUEST_SIZE) {
+  if (contentLength !== null) {
+    const parsed = parseInt(contentLength, 10);
+    if (!Number.isNaN(parsed) && parsed > MAX_REQUEST_SIZE) {
+      throw new ApiError("VALIDATION_ERROR", "Request too large");
+    }
+  }
+
+  // Authoritative check: measure the actual received body.
+  const cloned = request.clone();
+  const body = await cloned.arrayBuffer();
+  if (body.byteLength > MAX_REQUEST_SIZE) {
     throw new ApiError("VALIDATION_ERROR", "Request too large");
   }
 }
