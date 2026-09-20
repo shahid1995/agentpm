@@ -1,84 +1,56 @@
 import { hashPassword, verifyPassword, generateToken, hashToken, generateSessionId, calculateSessionExpiry, isSessionExpired } from "../security/auth";
-
-export interface User {
-  id: string;
-  email: string;
-  passwordHash: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface Session {
-  id: string;
-  userId: string;
-  sessionTokenHash: string;
-  createdAt: Date;
-  expiresAt: Date;
-  lastSeenAt?: Date;
-  revokedAt?: Date;
-}
+import {
+  createUser,
+  findUserByEmail,
+  findUserById,
+  createSession,
+  findSessionByTokenHash,
+  revokeSession,
+  revokeAllUserSessions,
+} from "../db/repositories";
+import type { User, Session } from "../db/schema";
 
 export interface AuthResult {
-  user: User;
+  user: { id: string; email: string };
   sessionToken: string;
 }
 
-interface UserStore {
-  users: Map<string, User>;
-  sessions: Map<string, Session>;
+export interface ResolvedSession {
+  userId: string;
+  email: string;
+  sessionId: string;
 }
-
-// In-memory store for development/testing
-// In production, this would be PostgreSQL via Drizzle
-const store: UserStore = {
-  users: new Map(),
-  sessions: new Map(),
-};
 
 export class AuthService {
   /**
    * Register a new user.
    */
   async register(email: string, password: string): Promise<AuthResult> {
-    // Check for existing user
-    const existingUser = Array.from(store.users.values()).find((u) => u.email === email);
+    const existingUser = await findUserByEmail(email);
     if (existingUser) {
       throw new Error("Email already registered");
     }
 
     const passwordHash = await hashPassword(password);
-    const id = generateSessionId();
-    const now = new Date();
-
-    const user: User = {
-      id,
-      email,
-      passwordHash,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    store.users.set(id, user);
+    const user = await createUser(email, passwordHash);
 
     const sessionToken = generateToken();
-    const session: Session = {
-      id: generateSessionId(),
-      userId: user.id,
-      sessionTokenHash: hashToken(sessionToken),
-      createdAt: now,
-      expiresAt: calculateSessionExpiry(),
+    const sessionTokenHash = hashToken(sessionToken);
+    const expiresAt = calculateSessionExpiry();
+
+    await createSession(user.id, sessionTokenHash, expiresAt);
+
+    return {
+      user: { id: user.id, email: user.email },
+      sessionToken,
     };
-
-    store.sessions.set(session.id, session);
-
-    return { user, sessionToken };
   }
 
   /**
    * Login with email and password.
    */
   async login(email: string, password: string): Promise<AuthResult> {
-    const user = Array.from(store.users.values()).find((u) => u.email === email);
+    const user = await findUserByEmail(email);
     if (!user) {
       throw new Error("Invalid credentials");
     }
@@ -89,19 +61,15 @@ export class AuthService {
     }
 
     const sessionToken = generateToken();
-    const now = new Date();
+    const sessionTokenHash = hashToken(sessionToken);
+    const expiresAt = calculateSessionExpiry();
 
-    const session: Session = {
-      id: generateSessionId(),
-      userId: user.id,
-      sessionTokenHash: hashToken(sessionToken),
-      createdAt: now,
-      expiresAt: calculateSessionExpiry(),
+    await createSession(user.id, sessionTokenHash, expiresAt);
+
+    return {
+      user: { id: user.id, email: user.email },
+      sessionToken,
     };
-
-    store.sessions.set(session.id, session);
-
-    return { user, sessionToken };
   }
 
   /**
@@ -109,61 +77,57 @@ export class AuthService {
    */
   async logout(sessionToken: string): Promise<void> {
     const tokenHash = hashToken(sessionToken);
-    for (const [id, session] of store.sessions) {
-      if (session.sessionTokenHash === tokenHash) {
-        session.revokedAt = new Date();
-        store.sessions.set(id, session);
-        return;
-      }
+    const session = await findSessionByTokenHash(tokenHash);
+
+    if (session && !session.revokedAt) {
+      await revokeSession(session.id);
     }
   }
 
   /**
    * Resolve session from token.
    */
-  async resolveSession(sessionToken: string): Promise<(Session & { user: User }) | null> {
+  async resolveSession(sessionToken: string): Promise<ResolvedSession | null> {
     const tokenHash = hashToken(sessionToken);
+    const session = await findSessionByTokenHash(tokenHash);
 
-    for (const session of store.sessions.values()) {
-      if (session.sessionTokenHash === tokenHash) {
-        // Check if revoked
-        if (session.revokedAt) {
-          return null;
-        }
-
-        // Check if expired
-        if (isSessionExpired(session.expiresAt)) {
-          return null;
-        }
-
-        const user = store.users.get(session.userId);
-        if (!user) {
-          return null;
-        }
-
-        return { ...session, user };
-      }
+    if (!session) {
+      return null;
     }
 
-    return null;
+    if (session.revokedAt) {
+      return null;
+    }
+
+    if (isSessionExpired(session.expiresAt)) {
+      return null;
+    }
+
+    const user = await findUserById(session.userId);
+    if (!user) {
+      return null;
+    }
+
+    return {
+      userId: user.id,
+      email: user.email,
+      sessionId: session.id,
+    };
   }
 
   /**
    * Revoke all sessions for a user.
    */
   async revokeAllUserSessions(userId: string): Promise<void> {
-    for (const [id, session] of store.sessions) {
-      if (session.userId === userId && !session.revokedAt) {
-        session.revokedAt = new Date();
-        store.sessions.set(id, session);
-      }
-    }
+    await revokeAllUserSessions(userId);
   }
 
   /**
    * Get user by ID.
    */
-  async getUserById(userId: string): Promise<User | null> {
-    return store.users.get(userId) || null;
+  async getUserById(userId: string): Promise<{ id: string; email: string } | null> {
+    const user = await findUserById(userId);
+    if (!user) return null;
+    return { id: user.id, email: user.email };
   }
 }

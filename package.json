@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "drizzle-orm": "^0.45.2",
