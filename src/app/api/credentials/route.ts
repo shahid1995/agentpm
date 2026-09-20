@@ -73,7 +73,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     const { provider, value } = result.data;
 
     // Persist through credential service (encrypts + stores in PostgreSQL)
-    const metadata = await getCredentialService().storeCredential(user.id, provider, value);
+    const metadata = await getCredentialService().storeCredential(user.userId, provider, value);
 
     return NextResponse.json(
       successResponse(metadata, { message: "Credential stored" }),
@@ -96,7 +96,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     const user = await getAuthenticatedUser(request);
 
     // Query persisted credentials from PostgreSQL
-    const credentials = await getCredentialService().getCredentials(user.id);
+    const credentials = await getCredentialService().getCredentials(user.userId);
 
     return NextResponse.json(successResponse({ credentials }));
   } catch (error) {
@@ -127,7 +127,7 @@ export async function DELETE(request: NextRequest): Promise<Response> {
     }
 
     const { credentialId } = result.data;
-    await getCredentialService().deleteCredential(credentialId, user.id);
+    await getCredentialService().deleteCredential(credentialId, user.userId);
 
     return NextResponse.json(successResponse(null, { message: "Credential deleted" }));
   } catch (error) {

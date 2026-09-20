@@ -72,10 +72,9 @@ export default function Home() {
       .map((t) => t.contextBoundary);
   }, [allTasks]);
 
-  // Repository tree hook
+  // Repository tree hook (credentials resolved server-side)
   const repoTree = useRepositoryTree(
     config?.repo || null,
-    config?.token || null,
     activeBoundaries
   );
 

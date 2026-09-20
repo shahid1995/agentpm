@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { successResponse, errorResponse, ApiError } from "../../../lib/api/api-contract";
-import { CredentialService } from "../../../lib/services/credential-service";
-import { AuthService } from "../../../lib/services/auth-service";
-import { extractSessionToken } from "../../../lib/api/cookies";
+import { successResponse, errorResponse, ApiError } from "../../../../lib/api/api-contract";
+import { CredentialService } from "../../../../lib/services/credential-service";
+import { AuthService } from "../../../../lib/services/auth-service";
+import { extractSessionToken } from "../../../../lib/api/cookies";
 
 let credentialService: CredentialService | null = null;
 let authService: AuthService | null = null;

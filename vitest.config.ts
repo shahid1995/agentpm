@@ -8,6 +8,13 @@ export default defineConfig({
     exclude: ['node_modules', '.next'],
     // Increase timeout for DB operations
     testTimeout: 10000,
+    // Integration tests share one PGlite instance per worker; run sequentially
+    // so sessions/credentials created in one file are visible to the next.
+    fileParallelism: false,
+    pool: 'forks',
+    poolOptions: {
+      forks: { singleFork: true },
+    },
   },
   resolve: {
     alias: {

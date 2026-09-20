@@ -1,9 +1,11 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, and } from "drizzle-orm";
 import { getDb } from "../db";
 import {
   users,
   sessions,
   encryptedCredentials,
+  projects,
+  projectMembers,
 } from "../db/schema";
 
 export interface User {
@@ -168,8 +170,7 @@ export async function getEncryptedCredentialByProvider(
       authTag: encryptedCredentials.authTag,
     })
     .from(encryptedCredentials)
-    .where(eq(encryptedCredentials.userId, userId))
-    .where(eq(encryptedCredentials.provider, provider as "github" | "openai"))
+    .where(and(eq(encryptedCredentials.userId, userId), eq(encryptedCredentials.provider, provider as "github" | "openai")))
     .limit(1);
   return cred || null;
 }
@@ -198,12 +199,15 @@ export async function createProject(
   return project;
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function findProjectById(id: string): Promise<{
   id: string;
   name: string;
   description: string | null;
   ownerId: string;
 } | null> {
+  if (!UUID_REGEX.test(id)) return null;
   const db = getDb();
   const [project] = await db
     .select({
@@ -231,12 +235,12 @@ export async function findProjectMember(
   projectId: string,
   userId: string
 ): Promise<{ id: string; role: "owner" | "member" } | null> {
+  if (!UUID_REGEX.test(projectId) || !UUID_REGEX.test(userId)) return null;
   const db = getDb();
   const [member] = await db
     .select({ id: projectMembers.id, role: projectMembers.role })
     .from(projectMembers)
-    .where(eq(projectMembers.projectId, projectId))
-    .where(eq(projectMembers.userId, userId))
+    .where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)))
     .limit(1);
   return member || null;
 }
