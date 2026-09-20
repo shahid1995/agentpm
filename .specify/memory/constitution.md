@@ -18,7 +18,7 @@
 - Tests must be deterministic, isolated, and fast (< 2s per test file)
 - No mocking of internal implementation details — test behavior, not structure
 
-### III. Modern Next.js 15 Principles
+### III. Modern Next.js 16 Principles
 - Use App Router exclusively — no Pages Router patterns
 - Server Components by default; Client Components only when necessary (interactivity, browser APIs)
 - Use React Server Actions for form submissions and data mutations
@@ -62,6 +62,7 @@
 - Implement proper CORS policies for API routes
 - Use HttpOnly cookies for authentication tokens
 - CSRF protection for all state-changing operations
+- Integration credentials (GitHub, OpenAI) must be encrypted at rest, never stored in browser localStorage
 
 ### Database & API
 - Use parameterized queries only — no raw SQL string concatenation
@@ -105,4 +106,12 @@ This constitution supersedes all other development practices. Amendments require
 3. Migration plan for existing code
 4. Version bump and changelog entry
 
-**Version**: 1.0.0 | **Ratified**: 2026-09-20 | **Last Amended**: 2026-09-20
+**Version**: 1.1.0 | **Ratified**: 2026-09-20 | **Last Amended**: 2026-09-20
+
+---
+
+## Amendment Log
+
+### v1.1.0 (2026-09-20)
+- **Section III**: Changed "Next.js 15" to "Next.js 16" to reflect actual runtime version 16.3.5
+- **Security**: Added explicit requirement for encrypted-at-rest integration credentials
