@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { deleteAllCredentials } from "@/lib/client/credentials";
 
 export interface GitHubConfig {
   repo: string;
@@ -89,12 +90,26 @@ export function SettingsModal({ isOpen, onClose, config, onSave, onClear }: Sett
     }
   };
 
-  const handleClear = () => {
-    onClear();
-    setRepo("");
-    setToken("");
-    setOpenaiKey("");
-    onClose();
+  const handleClear = async () => {
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      // Delete persisted server-side credentials (GitHub + OpenAI).
+      // Idempotent: succeeds when none exist. UI state only clears
+      // after the server-side deletion succeeds.
+      await deleteAllCredentials();
+      onClear();
+      setRepo("");
+      setToken("");
+      setOpenaiKey("");
+      onClose();
+    } catch (err) {
+      setSaveError(
+        err instanceof Error ? err.message : "Failed to delete credentials"
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -169,9 +184,10 @@ export function SettingsModal({ isOpen, onClose, config, onSave, onClear }: Sett
             <button
               type="button"
               onClick={handleClear}
-              className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/30"
+              disabled={isSaving}
+              className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/30"
             >
-              Disconnect
+              {isSaving ? "Disconnecting…" : "Disconnect"}
             </button>
             <div className="flex gap-2">
               <button
