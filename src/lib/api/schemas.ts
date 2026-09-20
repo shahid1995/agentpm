@@ -52,6 +52,14 @@ export const storeCredentialSchema = z.object({
   value: z.string().min(1).max(2048),
 });
 
+export const deleteCredentialSchema = z.object({
+  credentialId: z.string().uuid(),
+});
+
+export const getCredentialSchema = z.object({
+  credentialId: z.string().uuid(),
+});
+
 // Context boundary schemas
 export const createContextBoundarySchema = z.object({
   workItemId: z.string().uuid(),

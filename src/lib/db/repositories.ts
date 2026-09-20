@@ -107,15 +107,19 @@ export async function saveEncryptedCredential(
   ciphertext: string,
   iv: string,
   authTag: string
-): Promise<void> {
+): Promise<{ id: string; createdAt: Date }> {
   const db = getDb();
-  await db.insert(encryptedCredentials).values({
-    userId,
-    provider: provider as "github" | "openai",
-    ciphertext,
-    iv,
-    authTag,
-  });
+  const [cred] = await db
+    .insert(encryptedCredentials)
+    .values({
+      userId,
+      provider: provider as "github" | "openai",
+      ciphertext,
+      iv,
+      authTag,
+    })
+    .returning({ id: encryptedCredentials.id, createdAt: encryptedCredentials.createdAt });
+  return cred;
 }
 
 export async function getEncryptedCredentials(userId: string): Promise<
@@ -135,6 +139,41 @@ export async function getEncryptedCredentials(userId: string): Promise<
   return creds;
 }
 
+export async function getEncryptedCredentialById(
+  credentialId: string,
+  userId: string
+): Promise<{ ciphertext: string; iv: string; authTag: string } | null> {
+  const db = getDb();
+  const [cred] = await db
+    .select({
+      ciphertext: encryptedCredentials.ciphertext,
+      iv: encryptedCredentials.iv,
+      authTag: encryptedCredentials.authTag,
+    })
+    .from(encryptedCredentials)
+    .where(eq(encryptedCredentials.id, credentialId))
+    .limit(1);
+  return cred || null;
+}
+
+export async function getEncryptedCredentialByProvider(
+  userId: string,
+  provider: string
+): Promise<{ ciphertext: string; iv: string; authTag: string } | null> {
+  const db = getDb();
+  const [cred] = await db
+    .select({
+      ciphertext: encryptedCredentials.ciphertext,
+      iv: encryptedCredentials.iv,
+      authTag: encryptedCredentials.authTag,
+    })
+    .from(encryptedCredentials)
+    .where(eq(encryptedCredentials.userId, userId))
+    .where(eq(encryptedCredentials.provider, provider as "github" | "openai"))
+    .limit(1);
+  return cred || null;
+}
+
 export async function deleteEncryptedCredential(
   credentialId: string,
   userId: string
@@ -143,4 +182,77 @@ export async function deleteEncryptedCredential(
   await db
     .delete(encryptedCredentials)
     .where(eq(encryptedCredentials.id, credentialId));
+}
+
+// Project repository functions
+export async function createProject(
+  name: string,
+  description: string | null,
+  ownerId: string
+): Promise<{ id: string; name: string; ownerId: string }> {
+  const db = getDb();
+  const [project] = await db
+    .insert(projects)
+    .values({ name, description, ownerId })
+    .returning({ id: projects.id, name: projects.name, ownerId: projects.ownerId });
+  return project;
+}
+
+export async function findProjectById(id: string): Promise<{
+  id: string;
+  name: string;
+  description: string | null;
+  ownerId: string;
+} | null> {
+  const db = getDb();
+  const [project] = await db
+    .select({
+      id: projects.id,
+      name: projects.name,
+      description: projects.description,
+      ownerId: projects.ownerId,
+    })
+    .from(projects)
+    .where(eq(projects.id, id))
+    .limit(1);
+  return project || null;
+}
+
+export async function createProjectMember(
+  projectId: string,
+  userId: string,
+  role: "owner" | "member"
+): Promise<void> {
+  const db = getDb();
+  await db.insert(projectMembers).values({ projectId, userId, role });
+}
+
+export async function findProjectMember(
+  projectId: string,
+  userId: string
+): Promise<{ id: string; role: "owner" | "member" } | null> {
+  const db = getDb();
+  const [member] = await db
+    .select({ id: projectMembers.id, role: projectMembers.role })
+    .from(projectMembers)
+    .where(eq(projectMembers.projectId, projectId))
+    .where(eq(projectMembers.userId, userId))
+    .limit(1);
+  return member || null;
+}
+
+export async function findProjectsByUserId(userId: string): Promise<
+  Array<{ id: string; name: string; role: "owner" | "member" }>
+> {
+  const db = getDb();
+  const results = await db
+    .select({
+      id: projects.id,
+      name: projects.name,
+      role: projectMembers.role,
+    })
+    .from(projectMembers)
+    .innerJoin(projects, eq(projectMembers.projectId, projects.id))
+    .where(eq(projectMembers.userId, userId));
+  return results;
 }

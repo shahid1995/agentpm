@@ -2,6 +2,8 @@ import { EncryptionService } from "../security/encryption";
 import {
   saveEncryptedCredential,
   getEncryptedCredentials,
+  getEncryptedCredentialById,
+  getEncryptedCredentialByProvider,
   deleteEncryptedCredential,
 } from "../db/repositories";
 
@@ -59,7 +61,7 @@ export class CredentialService {
   ): Promise<CredentialMetadata> {
     const encrypted = this.encryptCredential(value);
 
-    await saveEncryptedCredential(
+    const result = await saveEncryptedCredential(
       userId,
       provider,
       encrypted.ciphertext,
@@ -68,10 +70,10 @@ export class CredentialService {
     );
 
     return {
-      id: "", // Would be returned from DB
+      id: result.id,
       provider,
       keyVersion: "v1",
-      createdAt: new Date(),
+      createdAt: result.createdAt,
     };
   }
 
@@ -84,6 +86,18 @@ export class CredentialService {
       ...c,
       provider: c.provider as "github" | "openai",
     }));
+  }
+
+  /**
+   * Get a decrypted credential by provider.
+   */
+  async getDecryptedCredential(
+    userId: string,
+    provider: "github" | "openai"
+  ): Promise<string | null> {
+    const encrypted = await getEncryptedCredentialByProvider(userId, provider);
+    if (!encrypted) return null;
+    return this.decryptCredential(encrypted);
   }
 
   /**

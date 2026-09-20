@@ -1,22 +1,57 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ApiError } from "../../../lib/api/api-contract";
+import { CredentialService } from "../../../lib/services/credential-service";
+import { AuthService } from "../../../lib/services/auth-service";
+import { extractSessionToken } from "../../../lib/api/cookies";
 
-export async function POST(request: NextRequest) {
+let credentialService: CredentialService | null = null;
+let authService: AuthService | null = null;
+
+function getCredentialService(): CredentialService {
+  if (!credentialService) {
+    credentialService = new CredentialService();
+  }
+  return credentialService;
+}
+
+function getAuthService(): AuthService {
+  if (!authService) {
+    authService = new AuthService();
+  }
+  return authService;
+}
+
+async function getAuthenticatedUser(request: NextRequest): Promise<{ userId: string; email: string }> {
+  const cookieHeader = request.headers.get("cookie");
+  const sessionToken = extractSessionToken(cookieHeader);
+
+  if (!sessionToken) {
+    throw new ApiError("UNAUTHORIZED", "Authentication required");
+  }
+
+  const session = await getAuthService().resolveSession(sessionToken);
+  if (!session) {
+    throw new ApiError("UNAUTHORIZED", "Invalid session");
+  }
+
+  return { userId: session.userId, email: session.email };
+}
+
+export async function POST(request: NextRequest): Promise<Response> {
   try {
-    const body = await request.json();
-    const { apiKey, messages, taskContext } = body;
+    const user = await getAuthenticatedUser(request);
 
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "Missing OpenAI API key" },
-        { status: 400 }
-      );
-    }
+    const body = await request.json();
+    const { messages, taskContext } = body;
 
     if (!messages || !Array.isArray(messages)) {
-      return NextResponse.json(
-        { error: "Invalid messages format" },
-        { status: 400 }
-      );
+      throw new ApiError("VALIDATION_ERROR", "Invalid messages format");
+    }
+
+    // Resolve OpenAI key from server-side encrypted credential
+    const apiKey = await getCredentialService().getDecryptedCredential(user.userId, "openai");
+    if (!apiKey) {
+      throw new ApiError("NOT_FOUND", "OpenAI credential not configured");
     }
 
     // Build system prompt with project constitution and task context
@@ -73,7 +108,7 @@ Column: ${taskContext.columnId || "Unknown"}` : "No task selected"}
       }
       if (response.status === 401) errorMsg = "Invalid OpenAI API key";
       if (response.status === 429) errorMsg = "Rate limited — try again later";
-      return NextResponse.json({ error: errorMsg }, { status: response.status });
+      throw new ApiError("OPENAI_ERROR", errorMsg);
     }
 
     const data = await response.json();
@@ -81,6 +116,9 @@ Column: ${taskContext.columnId || "Unknown"}` : "No task selected"}
 
     return NextResponse.json({ message: assistantMessage });
   } catch (error) {
+    if (error instanceof ApiError) {
+      return error.toResponse();
+    }
     console.error("[AgentPM API] ChatGPT proxy error:", error);
     return NextResponse.json(
       { error: "Internal server error" },

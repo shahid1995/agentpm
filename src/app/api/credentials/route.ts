@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { successResponse, errorResponse, ApiError } from "../../../lib/api/api-contract";
-import { storeCredentialSchema } from "../../../lib/api/schemas";
+import { storeCredentialSchema, deleteCredentialSchema } from "../../../lib/api/schemas";
 import { CredentialService } from "../../../lib/services/credential-service";
 import { AuthService } from "../../../lib/services/auth-service";
 import { extractSessionToken } from "../../../lib/api/cookies";
@@ -59,6 +59,11 @@ export async function POST(request: NextRequest): Promise<Response> {
     const user = await getAuthenticatedUser(request);
     checkCsrf(request);
 
+    const contentLength = request.headers.get("content-length");
+    if (contentLength && parseInt(contentLength) > 1024 * 1024) {
+      throw new ApiError("VALIDATION_ERROR", "Request too large");
+    }
+
     const body = await request.json();
     const result = storeCredentialSchema.safeParse(body);
     if (!result.success) {
@@ -66,37 +71,42 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
 
     const { provider, value } = result.data;
-    const encrypted = getCredentialService().encryptCredential(value);
 
-    console.log(`[Credentials] Storing ${provider} credential for user ${user.userId}`);
+    // Persist through credential service (encrypts + stores in PostgreSQL)
+    const metadata = await getCredentialService().storeCredential(user.id, provider, value);
 
-    const response = {
-      provider,
-      keyVersion: "v1",
-      createdAt: new Date().toISOString(),
-    };
-
-    return NextResponse.json(successResponse(response, { message: "Credential stored" }), { status: 201 });
+    return NextResponse.json(
+      successResponse(metadata, { message: "Credential stored" }),
+      { status: 201 }
+    );
   } catch (error) {
     if (error instanceof ApiError) {
       return error.toResponse();
     }
     console.error("Credential storage error:", error);
-    return NextResponse.json(errorResponse("INTERNAL_ERROR", "Failed to store credential"), { status: 500 });
+    return NextResponse.json(
+      errorResponse("INTERNAL_ERROR", "Failed to store credential"),
+      { status: 500 }
+    );
   }
 }
 
 export async function GET(request: NextRequest): Promise<Response> {
   try {
     const user = await getAuthenticatedUser(request);
-    const credentials: Array<{ provider: string; keyVersion: string; createdAt: string }> = [];
+
+    // Query persisted credentials from PostgreSQL
+    const credentials = await getCredentialService().getCredentials(user.id);
 
     return NextResponse.json(successResponse({ credentials }));
   } catch (error) {
     if (error instanceof ApiError) {
       return error.toResponse();
     }
-    return NextResponse.json(errorResponse("INTERNAL_ERROR", "Failed to fetch credentials"), { status: 500 });
+    return NextResponse.json(
+      errorResponse("INTERNAL_ERROR", "Failed to fetch credentials"),
+      { status: 500 }
+    );
   }
 }
 
@@ -105,11 +115,28 @@ export async function DELETE(request: NextRequest): Promise<Response> {
     const user = await getAuthenticatedUser(request);
     checkCsrf(request);
 
+    const contentLength = request.headers.get("content-length");
+    if (contentLength && parseInt(contentLength) > 1024 * 1024) {
+      throw new ApiError("VALIDATION_ERROR", "Request too large");
+    }
+
+    const body = await request.json();
+    const result = deleteCredentialSchema.safeParse(body);
+    if (!result.success) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid credential data", result.error.flatten());
+    }
+
+    const { credentialId } = result.data;
+    await getCredentialService().deleteCredential(credentialId, user.id);
+
     return NextResponse.json(successResponse(null, { message: "Credential deleted" }));
   } catch (error) {
     if (error instanceof ApiError) {
       return error.toResponse();
     }
-    return NextResponse.json(errorResponse("INTERNAL_ERROR", "Failed to delete credential"), { status: 500 });
+    return NextResponse.json(
+      errorResponse("INTERNAL_ERROR", "Failed to delete credential"),
+      { status: 500 }
+    );
   }
 }
