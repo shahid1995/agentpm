@@ -51,8 +51,8 @@ export function useRepositoryTree(
         throw new Error(errorMsg);
       }
 
-      const json = await response.json();
-      const data = json?.data;
+      const json: { data: GitHubTreeResponse } = await response.json();
+      const data = json.data;
       const treeData = buildTreeFromGitHubResponse(data.tree || [], activeBoundaries);
       setTree(treeData);
       setBranch(data.branch || null);

@@ -35,19 +35,7 @@ export function useGitHub() {
     setIsLoaded(true);
   }, []);
 
-  const saveConfig = React.useCallback(async (newConfig: GitHubConfig) => {
-    setConfig(newConfig);
-  }, []);
-
-  const clearConfig = React.useCallback(() => {
-    setConfig(null);
-    setIssues([]);
-    setError(null);
-  }, []);
-
-  const fetchIssues = React.useCallback(async () => {
-    if (!config?.repo) return;
-
+  const fetchIssuesForRepo = React.useCallback(async (repo: string) => {
     setIsLoading(true);
     setError(null);
 
@@ -58,7 +46,7 @@ export function useGitHub() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          repo: config.repo,
+          repo,
         }),
       });
 
@@ -68,6 +56,7 @@ export function useGitHub() {
         const errMsg = data?.error?.message || `API error: ${response.status}`;
         throw new Error(errMsg);
       }
+
       setIssues(data?.data?.issues || []);
     } catch (err) {
       console.error("[AgentPM] Fetch error:", err);
@@ -79,13 +68,28 @@ export function useGitHub() {
     } finally {
       setIsLoading(false);
     }
-  }, [config]);
+  }, []);
 
-  React.useEffect(() => {
-    if (config?.repo) {
-      fetchIssues();
-    }
-  }, [config, fetchIssues]);
+  const saveConfig = React.useCallback(
+    async (newConfig: GitHubConfig) => {
+      setConfig(newConfig);
+      if (newConfig.repo) {
+        await fetchIssuesForRepo(newConfig.repo);
+      }
+    },
+    [fetchIssuesForRepo]
+  );
+
+  const clearConfig = React.useCallback(() => {
+    setConfig(null);
+    setIssues([]);
+    setError(null);
+  }, []);
+
+  const fetchIssues = React.useCallback(async () => {
+    if (!config?.repo) return;
+    await fetchIssuesForRepo(config.repo);
+  }, [config, fetchIssuesForRepo]);
 
   return {
     config,

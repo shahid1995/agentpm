@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { NextRequest } from "next/server";
 import { initDb } from "../../lib/db/index";
 import { CredentialService } from "../../lib/services/credential-service";
 import { POST as chatgptPOST } from "../../app/api/chatgpt/route";

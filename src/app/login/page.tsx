@@ -2,7 +2,10 @@
 
 import * as React from "react";
 
+import { useRouter } from "next/navigation";
+
 export default function LoginPage() {
+  const router = useRouter();
   const [isLogin, setIsLogin] = React.useState(true);
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -28,7 +31,7 @@ export default function LoginPage() {
       }
 
       // Redirect to dashboard on success
-      window.location.href = "/";
+      router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
