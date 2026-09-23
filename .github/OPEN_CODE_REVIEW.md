@@ -45,3 +45,5 @@ No credential is committed to the repository.
 - AgentPM-specific rules in `.github/open-code-review-rules.json`
 
 OpenCodeReview does not modify source code, merge PRs, deploy, or redefine AgentPM architecture.
+
+<!-- OpenCodeReview smoke-test marker: inert documentation-only change -->
