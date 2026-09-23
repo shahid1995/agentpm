@@ -1,0 +1,135 @@
+{
+  "name": "AgentPM Engineering Rules",
+  "description": "Repository-specific OpenCodeReview rules for AgentPM",
+  "version": "1.0.0",
+  "rules": [
+    {
+      "id": "SEC-001",
+      "category": "security",
+      "severity": "critical",
+      "title": "Credential exposure",
+      "description": "Never log, return, persist, or commit provider API keys, session tokens, passwords, CSRF secrets, or encrypted credential plaintext.",
+      "check": "Trace credential values and verify they remain server-side and secret-free at API/log/UI boundaries."
+    },
+    {
+      "id": "SEC-002",
+      "category": "security",
+      "severity": "critical",
+      "title": "Authentication boundary",
+      "description": "Protected API routes must authenticate from the server-controlled session boundary and must not trust browser-supplied identity or roles.",
+      "check": "Verify every protected route has explicit authentication and rejects missing or invalid sessions."
+    },
+    {
+      "id": "SEC-003",
+      "category": "security",
+      "severity": "critical",
+      "title": "Authorization isolation",
+      "description": "Project, repository, work-item, credential, and execution data must be scoped to the authenticated user and authorized project membership.",
+      "check": "Check for cross-user or cross-project access paths and client-controlled authorization."
+    },
+    {
+      "id": "SEC-004",
+      "category": "security",
+      "severity": "critical",
+      "title": "Provider secret handling",
+      "description": "GitHub/OpenAI credentials must be encrypted at rest, resolved server-side, and never sourced from browser localStorage or request-body secrets.",
+      "check": "Verify provider adapters receive credentials only from the server-side credential boundary."
+    },
+    {
+      "id": "SEC-005",
+      "category": "security",
+      "severity": "high",
+      "title": "CSRF protection",
+      "description": "State-changing authenticated browser operations must enforce the repository's CSRF contract.",
+      "check": "Verify POST/PATCH/DELETE mutations reject missing, invalid, or mismatched CSRF material where required."
+    },
+    {
+      "id": "SEC-006",
+      "category": "security",
+      "severity": "high",
+      "title": "Input validation",
+      "description": "External input must be validated with Zod or an equivalent typed validation boundary before use.",
+      "check": "Check route params, request bodies, query parameters, and webhook payloads."
+    },
+    {
+      "id": "DB-001",
+      "category": "bug",
+      "severity": "critical",
+      "title": "Parameterized database access",
+      "description": "Use Drizzle/parameterized queries; never concatenate untrusted values into SQL.",
+      "check": "Inspect all modified queries for injection risk and accidental broad reads."
+    },
+    {
+      "id": "DB-002",
+      "category": "bug",
+      "severity": "critical",
+      "title": "Migration correctness",
+      "description": "Schema changes require the repository's migration mechanism and must preserve production compatibility.",
+      "check": "Verify new tables/indexes/constraints exist in production migrations and handle existing data safely."
+    },
+    {
+      "id": "DB-003",
+      "category": "bug",
+      "severity": "high",
+      "title": "Transaction and replacement semantics",
+      "description": "Multi-step persistence and credential replacement operations must be atomic and must not leave stale or duplicate rows.",
+      "check": "Look for race conditions, duplicate credential rows, partial writes, and rollback gaps."
+    },
+    {
+      "id": "API-001",
+      "category": "bug",
+      "severity": "high",
+      "title": "API contract correctness",
+      "description": "Responses must follow the documented {data,error,meta} shape and use the documented HTTP status semantics.",
+      "check": "Verify success/error payloads and status codes for changed endpoints."
+    },
+    {
+      "id": "API-002",
+      "category": "security",
+      "severity": "high",
+      "title": "Error leakage",
+      "description": "Provider, database, and authentication failures must not expose stack traces, credentials, internal tokens, or implementation details.",
+      "check": "Inspect error translation and logging behavior."
+    },
+    {
+      "id": "NEXT-001",
+      "category": "bug",
+      "severity": "high",
+      "title": "Server/client boundary",
+      "description": "Secrets, privileged provider calls, authorization, and database access must remain on the server and must not leak into Client Components.",
+      "check": "Check use of server APIs, client boundaries, environment variables, and browser bundles."
+    },
+    {
+      "id": "GH-001",
+      "category": "security",
+      "severity": "high",
+      "title": "GitHub integration trust boundary",
+      "description": "GitHub repository/tree/issue operations must validate repository ownership and credentials server-side and must safely handle truncated or hostile API data.",
+      "check": "Verify provider boundary, response validation, and untrusted GitHub data handling."
+    },
+    {
+      "id": "TEST-001",
+      "category": "test",
+      "severity": "high",
+      "title": "Regression tests",
+      "description": "Security and bug fixes require deterministic behavioral tests that would fail on the old behavior.",
+      "check": "Verify changed security/API/database behavior has focused regression coverage."
+    },
+    {
+      "id": "TEST-002",
+      "category": "test",
+      "severity": "medium",
+      "title": "Test quality",
+      "description": "Tests should exercise public behavior, avoid tautological assertions, and cover negative authorization and validation paths.",
+      "check": "Look for missing failure cases and implementation-coupled tests."
+    },
+    {
+      "id": "OPS-001",
+      "category": "maintainability",
+      "severity": "medium",
+      "title": "CI action pinning",
+      "description": "Third-party GitHub Actions used for security-sensitive CI should be pinned to reviewed commit SHAs rather than mutable tags.",
+      "check": "Check workflow action references and least-privilege permissions."
+    }
+  ]
+}
