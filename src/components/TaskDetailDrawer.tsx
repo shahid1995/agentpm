@@ -48,7 +48,7 @@ export function TaskDetailDrawer({ task, columns, onClose, isOpen }: TaskDetailD
     };
   }, [task]);
 
-  const { messages, isLoading, error, hasMounted, isConfigured, sendMessage } = useChatGPT(taskContext);
+  const { messages, isLoading, error, hasMounted, sendMessage } = useChatGPT(taskContext);
 
   // Close on Escape key
   React.useEffect(() => {
@@ -134,9 +134,6 @@ export function TaskDetailDrawer({ task, columns, onClose, isOpen }: TaskDetailD
             }`}
           >
             🤖 Chat
-            {isConfigured && (
-              <span className="ml-2 inline-block h-2 w-2 rounded-full bg-green-500"></span>
-            )}
           </button>
         </div>
 
@@ -229,7 +226,7 @@ export function TaskDetailDrawer({ task, columns, onClose, isOpen }: TaskDetailD
                     Checking for OpenAI API key configuration...
                   </p>
                 </div>
-              ) : isConfigured ? (
+              ) : (
                 <>
                   {/* Messages */}
                   <div className="flex-1 space-y-4 overflow-y-auto p-6">
@@ -306,27 +303,13 @@ export function TaskDetailDrawer({ task, columns, onClose, isOpen }: TaskDetailD
                         Send
                       </button>
                     </div>
+                    {error && (
+                      <p className="mt-2 text-xs text-red-600 dark:text-red-400" role="alert">
+                        {error}
+                      </p>
+                    )}
                   </div>
                 </>
-              ) : (
-                /* No API Key */
-                <div className="flex h-full flex-col items-center justify-center p-6 text-center">
-                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-zinc-100 text-xl dark:bg-zinc-800">
-                    ⚙️
-                  </div>
-                  <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                    ChatGPT Not Configured
-                  </h4>
-                  <p className="mt-2 max-w-xs text-xs text-zinc-500 dark:text-zinc-400">
-                    Please add your OpenAI API key in settings to unlock the built-in ChatGPT planner.
-                  </p>
-                  <button
-                    onClick={() => setActiveTab("details")}
-                    className="mt-4 rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                  >
-                    ← Back to Details
-                  </button>
-                </div>
               )}
             </div>
           )}

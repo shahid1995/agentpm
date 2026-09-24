@@ -2,6 +2,8 @@ import { EncryptionService } from "../security/encryption";
 import {
   saveEncryptedCredential,
   getEncryptedCredentials,
+  getEncryptedCredentialById,
+  getEncryptedCredentialByProvider,
   deleteEncryptedCredential,
 } from "../db/repositories";
 
@@ -59,7 +61,7 @@ export class CredentialService {
   ): Promise<CredentialMetadata> {
     const encrypted = this.encryptCredential(value);
 
-    await saveEncryptedCredential(
+    const result = await saveEncryptedCredential(
       userId,
       provider,
       encrypted.ciphertext,
@@ -68,10 +70,10 @@ export class CredentialService {
     );
 
     return {
-      id: "", // Would be returned from DB
+      id: result.id,
       provider,
       keyVersion: "v1",
-      createdAt: new Date(),
+      createdAt: result.createdAt,
     };
   }
 
@@ -79,13 +81,33 @@ export class CredentialService {
    * Get all credentials for a user (metadata only, no values).
    */
   async getCredentials(userId: string): Promise<CredentialMetadata[]> {
-    return getEncryptedCredentials(userId);
+    const creds = await getEncryptedCredentials(userId);
+    return creds.map((c) => ({
+      ...c,
+      provider: c.provider as "github" | "openai",
+    }));
   }
 
   /**
-   * Delete a credential.
+   * Get a decrypted credential by provider.
    */
-  async deleteCredential(credentialId: string, userId: string): Promise<void> {
+  async getDecryptedCredential(
+    userId: string,
+    provider: "github" | "openai"
+  ): Promise<string | null> {
+    const encrypted = await getEncryptedCredentialByProvider(userId, provider);
+    if (!encrypted) return null;
+    return this.decryptCredential(encrypted);
+  }
+
+  /**
+   * Delete a credential. Returns false when no matching credential
+   * exists for this user (id nonexistent or owned by another user).
+   */
+  async deleteCredential(credentialId: string, userId: string): Promise<boolean> {
+    const existing = await getEncryptedCredentialById(credentialId, userId);
+    if (!existing) return false;
     await deleteEncryptedCredential(credentialId, userId);
+    return true;
   }
 }

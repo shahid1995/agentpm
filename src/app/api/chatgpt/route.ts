@@ -1,22 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
+import { successResponse, errorResponse, ApiError } from "../../../lib/api/api-contract";
+import { chatgptRequestSchema } from "../../../lib/api/schemas";
+import {
+  authenticate,
+  enforceRateLimit,
+  enforceRequestSize,
+} from "../../../lib/api/security";
+import { CredentialService } from "../../../lib/services/credential-service";
 
-export async function POST(request: NextRequest) {
+let credentialService: CredentialService | null = null;
+
+function getCredentialService(): CredentialService {
+  if (!credentialService) {
+    credentialService = new CredentialService();
+  }
+  return credentialService;
+}
+
+export async function POST(request: NextRequest): Promise<Response> {
   try {
-    const body = await request.json();
-    const { apiKey, messages, taskContext } = body;
+    // Phase 1 security boundary: auth → rate limit → size → validation
+    const user = await authenticate(request);
+    enforceRateLimit(`chatgpt:${user.userId}`, "sensitive");
+    await enforceRequestSize(request);
 
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "Missing OpenAI API key" },
-        { status: 400 }
-      );
+    const body = await request.json();
+    const result = chatgptRequestSchema.safeParse(body);
+    if (!result.success) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid request", result.error.flatten());
     }
 
-    if (!messages || !Array.isArray(messages)) {
-      return NextResponse.json(
-        { error: "Invalid messages format" },
-        { status: 400 }
-      );
+    const { messages, taskContext } = result.data;
+
+    // Resolve OpenAI key from server-side encrypted credential
+    const apiKey = await getCredentialService().getDecryptedCredential(user.userId, "openai");
+    if (!apiKey) {
+      throw new ApiError("NOT_FOUND", "OpenAI credential not configured");
     }
 
     // Build system prompt with project constitution and task context
@@ -73,17 +92,20 @@ Column: ${taskContext.columnId || "Unknown"}` : "No task selected"}
       }
       if (response.status === 401) errorMsg = "Invalid OpenAI API key";
       if (response.status === 429) errorMsg = "Rate limited — try again later";
-      return NextResponse.json({ error: errorMsg }, { status: response.status });
+      throw new ApiError("OPENAI_ERROR", errorMsg);
     }
 
     const data = await response.json();
     const assistantMessage = data.choices?.[0]?.message?.content || "";
 
-    return NextResponse.json({ message: assistantMessage });
+    return NextResponse.json(successResponse({ message: assistantMessage }));
   } catch (error) {
+    if (error instanceof ApiError) {
+      return error.toResponse();
+    }
     console.error("[AgentPM API] ChatGPT proxy error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      errorResponse("INTERNAL_ERROR", "Failed to get AI response"),
       { status: 500 }
     );
   }

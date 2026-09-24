@@ -33,7 +33,7 @@ export async function authenticateRequest(
     return null;
   }
 
-  return { userId: session.user.id, email: session.user.email };
+  return { userId: session.userId, email: session.email };
 }
 
 /**

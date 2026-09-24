@@ -1,10 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { useAuth } from "@/context/AuthContext";
+
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
-  const { login, register } = useAuth();
+  const router = useRouter();
   const [isLogin, setIsLogin] = React.useState(true);
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -17,11 +18,20 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      if (isLogin) {
-        await login(email, password);
-      } else {
-        await register(email, password);
+      const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error?.message || "Authentication failed");
       }
+
+      // Redirect to dashboard on success
+      router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {

@@ -1,7 +1,7 @@
 # AgentPM Architecture Document
 
-**Status:** Phase 0 — Architecture Lock
-**Version:** 1.0.0
+**Status:** Phase 1 — Security Foundation (remediation applied)
+**Version:** 1.1.0
 **Last Updated:** 2026-09-20
 
 ---
@@ -10,19 +10,22 @@
 
 AgentPM is a visual project management platform for AI-assisted development workflows. It combines Kanban-style task management with GitHub repository integration, AI-powered planning, and codebase visualization.
 
-### Current State
+### Current State (Phase 1 implemented)
 - **Runtime:** Next.js 16.3.5 (App Router)
 - **Styling:** Tailwind CSS + custom UI components
-- **State:** Browser localStorage (temporary)
-- **Authentication:** None
-- **Database:** None (stateless)
+- **State:** Server-authoritative (auth/sessions/credentials); localStorage only for UI state (Kanban tasks)
+- **Authentication:** Custom session management — PostgreSQL-backed, HttpOnly cookies, bcrypt password hashing
+- **Database:** PGlite (embedded PostgreSQL) for dev/test; PostgreSQL/Neon-compatible migration for production
+- **Credentials:** AES-256-GCM encrypted, stored server-side in PostgreSQL, never in browser storage
+- **API security:** Zod validation, CSRF (double-submit), rate limiting, request-size limits, standard `{data, error, meta}` contract
 
-### Target State
-- **Runtime:** Next.js 16.x (App Router)
-- **Database:** Neon/PostgreSQL
-- **Authentication:** Custom session management
+### Historical State (Phase 0 — superseded)
+- State stored entirely in browser localStorage; no authentication; no database. Superseded by Phase 1.
+
+### Target State (future phases)
+- **Database:** Neon/PostgreSQL (production)
 - **State:** Server-authoritative with client cache
-- **Security:** Encrypted credentials, CSRF protection, rate limiting
+- **Security:** Same Phase 1 boundary, extended to all resources
 
 ---
 
@@ -41,10 +44,12 @@ User
 Session
 ├── id: UUID
 ├── userId: UUID (FK)
-├── token: string (hashed)
+├── sessionTokenHash: string (unique) — raw token never stored
 ├── expiresAt: timestamp
 ├── createdAt: timestamp
-└── revokedAt: timestamp?
+├── lastSeenAt: timestamp?
+├── revokedAt: timestamp?
+└── metadata: jsonb?
 
 Project
 ├── id: UUID
@@ -55,529 +60,152 @@ Project
 └── updatedAt: timestamp
 
 ProjectMember
+├── id: UUID
 ├── projectId: UUID (FK)
 ├── userId: UUID (FK)
-├── role: enum (owner, editor, viewer)
+├── role: enum (owner, member)
 └── joinedAt: timestamp
-
-Repository
-├── id: UUID
-├── projectId: UUID (FK → Project)
-├── provider: string (default: 'github')
-├── owner: string
-├── name: string
-├── defaultBranch: string
-├── credentialId: UUID (FK → EncryptedCredential)
-├── createdAt: timestamp
-└── updatedAt: timestamp
-
-WorkItem
-├── id: UUID
-├── projectId: UUID (FK → Project)
-├── repositoryId: UUID? (FK → Repository)
-├── githubIssueId: string? (external ref)
-├── title: string
-├── description: string
-├── status: enum (idea, planning, ready, executing, verification, done)
-├── priority: enum (low, medium, high)?
-├── createdAt: timestamp
-└── updatedAt: timestamp
-
-ContextBoundary
-├── id: UUID
-├── workItemId: UUID (FK → WorkItem)
-├── repositoryId: UUID (FK → Repository)
-├── branch: string?
-├── paths: string[]
-├── files: string[]
-├── exclusions: string[]
-└── createdAt: timestamp
-
-Specification
-├── id: UUID
-├── workItemId: UUID (FK → WorkItem)
-├── version: integer
-├── content: string
-├── status: enum (draft, review, approved, superseded)
-├── createdAt: timestamp
-└── updatedAt: timestamp
-
-AgentPrompt
-├── id: UUID
-├── workItemId: UUID (FK → WorkItem)
-├── version: integer
-├── content: string
-├── generatedBy: enum (user, ai)
-├── approvedAt: timestamp?
-├── createdAt: timestamp
-└── updatedAt: timestamp
-
-Execution
-├── id: UUID
-├── workItemId: UUID (FK → WorkItem)
-├── agentType: string?
-├── status: enum (pending, running, succeeded, failed, cancelled)
-├── startedAt: timestamp?
-├── completedAt: timestamp?
-├── result: jsonb?
-└── createdAt: timestamp
-
-Verification
-├── id: UUID
-├── executionId: UUID (FK → Execution)
-├── status: enum (not_started, running, passed, failed, blocked)
-├── verifier: string
-├── startedAt: timestamp?
-├── completedAt: timestamp?
-├── summary: string?
-└── createdAt: timestamp
-
-Evidence
-├── id: UUID
-├── verificationId: UUID (FK → Verification)
-├── type: enum (test_result, build_result, lint_result, screenshot, commit, pull_request, review, log, manual)
-├── description: string
-├── reference: string
-└── createdAt: timestamp
 
 EncryptedCredential
 ├── id: UUID
 ├── userId: UUID (FK → User)
 ├── provider: enum (github, openai)
-├── encryptedValue: bytea
-├── iv: bytea
-├── tag: bytea
+├── ciphertext: string (AES-256-GCM)
+├── iv: string
+├── authTag: string
+├── keyVersion: string
 ├── createdAt: timestamp
-└── updatedAt: timestamp
-```
-
-### 2.2 Relationships
-
-```
-User 1───* Project (ownership)
-User 1───* ProjectMember
-Project 1───* ProjectMember
-Project 1───* WorkItem
-Project 1───* Repository
-Repository 1───* WorkItem
-Repository 1───* ContextBoundary
-WorkItem 1───* ContextBoundary
-WorkItem 1───* Specification
-WorkItem 1───* AgentPrompt
-WorkItem 1───* Execution
-Execution 1───* Verification
-Verification 1───* Evidence
-User 1───* EncryptedCredential
+├── updatedAt: timestamp
+└── revokedAt: timestamp?
 ```
 
 ---
 
-## 3. Workflow Model
+## 3. Persistence Architecture
 
-### 3.1 Work Item Lifecycle
+### 3.1 Development / Test
 
-```
-┌─────────┐
-│  Idea   │ Initial capture
-└────┬────┘
-     ▼
-┌─────────┐
-│Planning │ AI-assisted specification
-└────┬────┘
-     ▼
-┌─────────┐
-│  Ready  │ Approved for execution
-└────┬────┘
-     ▼
-┌─────────┐
-│Executing│ Agent/coding work
-└────┬────┘
-     ▼
-┌─────────┐
-│Verification│ Evidence-based validation
-└────┬────┘
-     ▼
-┌─────────┐
-│  Done   │ Verified complete
-└─────────┘
-```
+**PGlite** (`@electric-sql/pglite`) — embedded PostgreSQL running in-process. Data persists to `.agentpm/pgdata/` (excluded from Git via `.gitignore`). Tables are created by `initDb()` in `src/lib/db/index.ts` using raw SQL (`CREATE TABLE IF NOT EXISTS`).
 
-### 3.2 Kanban Column Mapping
+### 3.2 Production (planned)
 
-| UI Column | Domain Status | Description |
-|-----------|---------------|-------------|
-| 📥 Ideas | `idea` | Initial capture |
-| 🧠 Planning | `planning` | AI-assisted specification |
-| 🤖 Ready | `ready` | Approved for execution |
-| 👀 Review | `verification` | Under verification |
-| ✅ Done | `done` | Verified complete |
+PostgreSQL/Neon via migration files (`drizzle/0000_init.sql`). The schema is PostgreSQL-compatible. `DATABASE_URL` will select the production connection.
+
+### 3.3 Repository Layer
+
+`src/lib/db/repositories.ts` — Drizzle ORM functions. All queries use `and()` for compound conditions (chained `.where()` calls replace each other in Drizzle — a known pitfall fixed in this remediation).
 
 ---
 
-## 4. API Contract
+## 4. Security Architecture (Phase 1)
 
-### 4.1 Standard Response
-
-**Success:**
-```json
-{
-  "data": {},
-  "error": null,
-  "meta": {
-    "page": 1,
-    "total": 100
-  }
-}
-```
-
-**Failure:**
-```json
-{
-  "data": null,
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Invalid request",
-    "details": {}
-  },
-  "meta": {}
-}
-```
-
-### 4.2 Error Codes
-
-| Code | HTTP | Description |
-|------|------|-------------|
-| `UNAUTHORIZED` | 401 | Missing or invalid session |
-| `FORBIDDEN` | 403 | Insufficient permissions |
-| `NOT_FOUND` | 404 | Resource not found |
-| `VALIDATION_ERROR` | 400 | Input validation failed |
-| `RATE_LIMITED` | 429 | Too many requests |
-| `INTERNAL_ERROR` | 500 | Server error |
-
-### 4.3 Endpoints (Target)
+### 4.1 Sessions
 
 ```
-POST   /api/auth/register
-POST   /api/auth/login
-POST   /api/auth/logout
-GET    /api/auth/session
-
-GET    /api/projects
-POST   /api/projects
-GET    /api/projects/:id
-PATCH  /api/projects/:id
-DELETE /api/projects/:id
-
-GET    /api/projects/:id/repositories
-POST   /api/projects/:id/repositories
-GET    /api/repositories/:id
-DELETE /api/repositories/:id
-
-GET    /api/projects/:id/work-items
-POST   /api/projects/:id/work-items
-GET    /api/work-items/:id
-PATCH  /api/work-items/:id
-DELETE /api/work-items/:id
-
-POST   /api/work-items/:id/specifications
-POST   /api/work-items/:id/agent-prompts
-POST   /api/work-items/:id/executions
-POST   /api/executions/:id/verifications
-
-GET    /api/github/repositories/:id/tree
-GET    /api/github/repositories/:id/issues
-POST   /api/github/repositories/:id/sync
-
-POST   /api/ai/chat
-POST   /api/ai/generate-spec
-POST   /api/ai/generate-prompt
+Browser ──HttpOnly cookie──▶ API route ──▶ AuthService.resolveSession()
+                                            │
+                                            ▼
+                                    hashToken(token)
+                                            │
+                                            ▼
+                            PostgreSQL sessions table (token hash lookup)
+                                            │
+                                    validate expiry/revocation
+                                            │
+                                            ▼
+                                    resolve User from users table
 ```
+
+- Raw session tokens are **never persisted** — only SHA-256 hashes.
+- Cookie: `agentpm_session`, HttpOnly, Secure (production), SameSite=Strict.
+- CSRF cookie: `agentpm_csrf` (readable by JS for double-submit pattern), validated against `x-csrf-token` header.
+
+### 4.2 Credential Encryption
+
+```
+Browser (plaintext, one-time) ──▶ POST /api/credentials
+                                        │
+                              Zod validate + CSRF + auth
+                                        │
+                                        ▼
+                            EncryptionService (AES-256-GCM)
+                                        │
+                                        ▼
+                        PostgreSQL encrypted_credentials (ciphertext, iv, authTag, keyVersion)
+                                        │
+                                        ▼
+                        Provider routes resolve credentials server-side
+                        (GitHub/OpenAI routes decrypt only in-memory)
+```
+
+- Key from `ENCRYPTION_KEY` env var (64 hex chars = 32 bytes), never stored in database.
+- Key versioning supported (`keyVersion` column).
+- GET returns metadata only: `{id, provider, keyVersion, createdAt}` — never ciphertext/iv/authTag.
+
+### 4.3 API Security Boundary
+
+All protected routes apply:
+1. Authentication (session cookie → PostgreSQL session)
+2. Authorization (persisted ProjectMember role, never client-supplied)
+3. Zod request validation
+4. CSRF for state-changing requests (double-submit)
+5. Request-size limits (1MB)
+6. Rate limiting (in-memory sliding window — dev limitation; Redis planned for production)
+7. Standard response contract: `{data, error: {code, message, details}, meta}`
+
+Error codes: `UNAUTHORIZED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `VALIDATION_ERROR` (400), `CONFLICT` (409), `RATE_LIMITED` (429), `INTERNAL_ERROR` (500).
+
+### 4.4 Authorization
+
+`AuthorizationService` queries persisted `project_members`. Client-supplied roles are never trusted. Roles: `owner`, `member`.
 
 ---
 
-## 5. Security Architecture
+## 5. API Surface
 
-### 5.1 Authentication Flow
+| Route | Method | Auth | CSRF | Purpose |
+|-------|--------|------|------|---------|
+| `/api/auth` | POST | — | — | register/login/logout (rate-limited) |
+| `/api/auth` | GET | session | — | resolve current session |
+| `/api/credentials` | POST | ✓ | ✓ | store encrypted credential |
+| `/api/credentials` | GET | ✓ | — | list credential metadata |
+| `/api/credentials` | DELETE | ✓ | ✓ | delete credential |
+| `/api/chatgpt` | POST | ✓ | — | OpenAI proxy (server-side key resolution) |
+| `/api/github/issues` | POST | ✓ | — | GitHub issues (server-side token) |
+| `/api/github/repository-tree` | POST | ✓ | — | GitHub tree (server-side token) |
 
-```
-Browser                    AgentPM API              Database
-   │                           │                       │
-   │── POST /auth/login ──────►│                       │
-   │                           │── validate user ─────►│
-   │                           │◄── user record ──────│
-   │                           │                       │
-   │                           │── create session ───►│
-   │◄── HttpOnly cookie ──────│                       │
-   │                           │                       │
-   │── API request + cookie ──►│                       │
-   │                           │── validate session ──►│
-   │                           │◄── session valid ────│
-   │                           │                       │
-   │                           │── authorize action    │
-   │◄── response ─────────────│                       │
-```
-
-### 5.2 Credential Storage
-
-```
-User Input
-    │
-    ▼
-Server Memory (ephemeral)
-    │
-    ▼
-Encrypt (AES-256-GCM)
-    │
-    ▼
-Database (encrypted at rest)
-    │
-    ▼
-Decrypt only when needed for API call
-    │
-    ▼
-Never logged, never returned to client
-```
-
-### 5.3 Authorization Model
-
-```
-Request
-  │
-  ▼
-Authenticate (session cookie → userId)
-  │
-  ▼
-Resolve resource (projectId, workItemId, etc.)
-  │
-  ▼
-Check membership (ProjectMember table)
-  │
-  ▼
-Check permission (role-based: owner/editor/viewer)
-  │
-  ▼
-Validate input (Zod schema)
-  │
-  ▼
-Execute operation
-```
+> Historical: credentials and provider tokens were previously passed from the browser in request bodies / localStorage (`agentpm-openai-key`, `agentpm-github-config`). Removed in Phase 1 remediation.
 
 ---
 
-## 6. Integration Architecture
+## 6. Test Architecture
 
-### 6.1 GitHub Adapter
-
-```
-GitHubAdapter
-    │
-    ├── listRepositories()
-    ├── getRepositoryTree(owner, repo, branch)
-    │       └── Handle truncated response
-    ├── listIssues(owner, repo)
-    ├── getIssue(owner, repo, number)
-    ├── createWebhook(owner, repo, events)
-    └── handleWebhook(payload)
-```
-
-### 6.2 AI Provider Interface
-
-```
-AIProvider
-    │
-    ├── generate(request: AIRequest): AIResponse
-    ├── stream(request: AIRequest): AsyncIterable<string>
-    └── getModels(): ModelInfo[]
-    │
-    ├── OpenAIProvider
-    │       └── gpt-4o, gpt-4o-mini, etc.
-    │
-    └── Future: AnthropicProvider, etc.
-```
+- **Framework:** Vitest 2 (`npx vitest run`)
+- **Config:** `vitest.config.ts` — `fileParallelism: false`, `singleFork` (single shared PGlite instance per run; integration tests depend on shared DB state)
+- **Layers:**
+  - Unit: `src/lib/**/*.test.ts` (encryption, auth, CSRF, rate limiter, schemas, API contract, cookies)
+  - Integration: `src/tests/integration/*.test.ts` (persistence, auth flows, security flow)
+  - **Boundary:** `api-boundary.test.ts`, `provider-boundary.test.ts` — exercise actual route handlers with `NextRequest` objects
 
 ---
 
-## 7. Component Architecture (Target)
+## 7. Phase 1 Status
 
-### 7.1 RepositoryExplorer Decomposition
+**Implemented and tested:**
+- PostgreSQL-backed authentication (register/login/logout/session)
+- HttpOnly session cookies; raw tokens never persisted
+- AES-256-GCM credential encryption with key versioning
+- Credential HTTP lifecycle (POST/GET/DELETE) with full security boundary
+- Server-side credential resolution for GitHub/OpenAI routes
+- Browser credential storage removed (localStorage keys eliminated)
+- Persisted project-membership authorization
+- CSRF, rate limiting, request-size limits on protected routes
+- Standard API response contract
 
-```
-RepositoryExplorer (orchestrator)
-├── RepositoryToolbar
-│       ├── SearchInput
-│       ├── CategoryFilter
-│       ├── ViewControls (zoom, pan, reset)
-│       └── RefreshButton
-│
-├── RepositoryCanvas
-│       ├── SvgLayer (edges, lines)
-│       ├── NodeLayer (positioned nodes)
-│       └── EnclosureLayer (folder groups)
-│
-├── RepositoryNode
-│       ├── FolderNode
-│       └── FileNode
-│
-├── RepositoryEdge
-│       ├── StructureEdge (solid)
-│       └── DependencyEdge (dashed, colored)
-│
-├── RepositoryStats
-│       └── File/Folder/Active counts
-│
-└── RepositoryDetails
-        └── Tooltip (path, status, actions)
-```
+**Known limitations (Phase 1):**
+- Rate limiting is process-local (single-instance only) — documented dev limitation
+- PGlite is single-connection; production requires PostgreSQL/Neon
+- Kanban tasks still use localStorage (UI state only — allowed by architecture)
+- Project CRUD UI not yet built (Phase 2 scope)
 
-### 7.2 TaskDetailDrawer Decomposition
-
-```
-TaskDetailDrawer (orchestrator)
-├── TaskDetails
-│       ├── Title
-│       ├── Description
-│       ├── StatusBadge
-│       └── Metadata
-│
-├── TaskContext
-│       ├── ContextBoundaryList
-│       └── RepositoryLink
-│
-├── TaskPrompt
-│       ├── PromptEditor
-│       ├── CopyButton
-│       └── VersionHistory
-│
-├── AIPlanner
-│       ├── ChatInterface
-│       ├── MessageList
-│       └── PromptInput
-│
-└── TaskActions
-        ├── MoveStatus
-        ├── EditTask
-        └── DeleteTask
-```
-
----
-
-## 8. Testing Strategy
-
-### 8.1 Test Layers
-
-| Layer | Scope | Tools | Priority |
-|-------|-------|-------|----------|
-| Unit | Domain functions, utilities | Vitest | P0 |
-| Integration | API routes, database | Vitest + test DB | P0 |
-| Component | React interactions | Testing Library | P1 |
-| API | Endpoint behavior | Supertest | P0 |
-| E2E | Critical workflows | Playwright | P2 |
-| Accessibility | WCAG checks | axe-core | P1 |
-
-### 8.2 Critical Test Scenarios
-
-1. **Authentication:** Register, login, logout, session expiry
-2. **Authorization:** Cross-project access denied, role enforcement
-3. **Work Items:** Create, update, move status, delete
-4. **GitHub Integration:** Tree fetch, issue sync, credential handling
-5. **AI Integration:** Chat, spec generation, prompt approval
-6. **Repository Visualization:** Node rendering, dependency detection, truncation handling
-
----
-
-## 9. Infrastructure
-
-### 9.1 Development
-
-```yaml
-Runtime: Next.js 16.3.5
-Database: Neon/PostgreSQL (dev instance)
-Auth: Custom session (dev mode)
-Storage: Local filesystem
-CI: GitHub Actions
-```
-
-### 9.2 Production (Target)
-
-```yaml
-Runtime: Next.js 16.x (Vercel or similar)
-Database: Neon/PostgreSQL (production)
-Auth: Custom session (Redis-backed)
-Storage: S3-compatible (for evidence/screenshots)
-CI: GitHub Actions
-Monitoring: Sentry + Vercel Analytics
-```
-
----
-
-## 10. Migration Strategy
-
-### Phase 0 (Current)
-- [x] Architecture document created
-- [x] Constitution reconciled (v1.1.0)
-- [ ] Domain schema finalized
-- [ ] API contract implemented
-- [ ] Test infrastructure established
-
-### Phase 1 (Security Foundation)
-- [ ] Implement User/Session models
-- [ ] Add authentication endpoints
-- [ ] Implement authorization middleware
-- [ ] Migrate credentials to encrypted storage
-- [ ] Add CSRF protection
-- [ ] Add rate limiting
-
-### Phase 2 (Domain + Persistence)
-- [ ] Set up Neon/PostgreSQL
-- [ ] Implement database migrations
-- [ ] Create domain services
-- [ ] Migrate localStorage state to database
-- [ ] Add project/work item CRUD
-
-### Phase 3 (API Foundation)
-- [ ] Standardize all API responses
-- [ ] Add Zod validation to all endpoints
-- [ ] Implement service boundaries
-- [ ] Add GitHub adapter abstraction
-- [ ] Add AI provider abstraction
-
-### Phase 4 (Testing)
-- [ ] Set up Vitest + Testing Library
-- [ ] Write unit tests for domain logic
-- [ ] Write integration tests for API
-- [ ] Write component tests
-- [ ] Set up CI gates
-
-### Phase 5-8
-- [ ] UI decomposition
-- [ ] Repository intelligence
-- [ ] AI planner
-- [ ] Advanced features
-
----
-
-## 11. Open Decisions
-
-| Decision | Status | Impact |
-|----------|--------|--------|
-| Next.js version | Resolved: Stay on 16.x | Low |
-| File length limit | Resolved: 300 lines enforced | Medium (requires refactor) |
-| Auth approach | Resolved: Custom session | High |
-| Database | Resolved: Neon/PostgreSQL | High |
-| Phase 0 tracking | Resolved: Documentation only | Low |
-
----
-
-## 12. Risks
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| Large repository tree truncation | High | Medium | Implement pagination/targeted retrieval |
-| Credential migration breaks existing users | Medium | High | Graceful migration + fallback |
-| AI provider API changes | Medium | Low | Provider abstraction layer |
-| Database migration complexity | Medium | Medium | Use migration tool (Drizzle/Prisma) |
-
----
-
-**Document Version:** 1.0.0
-**Next Review:** After Phase 1 completion
+**Awaiting:** independent verification audit.

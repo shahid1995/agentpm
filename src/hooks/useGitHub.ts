@@ -18,8 +18,6 @@ export interface GitHubIssue {
 
 export interface GitHubConfig {
   repo: string;
-  token: string;
-  openaiKey?: string;
 }
 
 /**
@@ -33,84 +31,11 @@ export function useGitHub() {
   const [error, setError] = React.useState<string | null>(null);
   const [isLoaded, setIsLoaded] = React.useState(false);
 
-  // Load credentials from server-side API on mount
   React.useEffect(() => {
-    const loadCredentials = async () => {
-      try {
-        const response = await fetch("/api/credentials");
-        if (response.ok) {
-          const data = await response.json();
-          if (data.data?.credentials?.length > 0) {
-            const githubCred = data.data.credentials.find(
-              (c: { provider: string }) => c.provider === "github"
-            );
-            if (githubCred) {
-              setConfig({
-                repo: "",
-                token: "",
-                openaiKey: "",
-              });
-            }
-          }
-        }
-      } catch {
-        // ignore
-      }
-      setIsLoaded(true);
-    };
-    loadCredentials();
+    setIsLoaded(true);
   }, []);
 
-  // Save credentials to server-side API
-  const saveConfig = React.useCallback(async (newConfig: GitHubConfig) => {
-    try {
-      // Store GitHub token
-      if (newConfig.token) {
-        await fetch("/api/credentials", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            provider: "github",
-            value: newConfig.token,
-          }),
-        });
-      }
-      // Store OpenAI token
-      if (newConfig.openaiKey) {
-        await fetch("/api/credentials", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            provider: "openai",
-            value: newConfig.openaiKey,
-          }),
-        });
-      }
-      setConfig(newConfig);
-    } catch (err) {
-      console.error("[AgentPM] Failed to save credentials:", err);
-    }
-  }, []);
-
-  const clearConfig = React.useCallback(async () => {
-    try {
-      // Clear credentials from server
-      await fetch("/api/credentials", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-      });
-    } catch {
-      // ignore
-    }
-    setConfig(null);
-    setIssues([]);
-    setError(null);
-  }, []);
-
-  // Fetch issues from local API proxy
-  const fetchIssues = React.useCallback(async () => {
-    if (!config?.repo || !config?.token) return;
-
+  const fetchIssuesForRepo = React.useCallback(async (repo: string) => {
     setIsLoading(true);
     setError(null);
 
@@ -121,18 +46,18 @@ export function useGitHub() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          repo: config.repo,
-          token: config.token,
+          repo,
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        const errMsg = data.error || `API error: ${response.status}`;
+        const errMsg = data?.error?.message || `API error: ${response.status}`;
         throw new Error(errMsg);
       }
-      setIssues(data.issues || []);
+
+      setIssues(data?.data?.issues || []);
     } catch (err) {
       console.error("[AgentPM] Fetch error:", err);
       if (err instanceof TypeError && err.message === "Failed to fetch") {
@@ -143,14 +68,28 @@ export function useGitHub() {
     } finally {
       setIsLoading(false);
     }
-  }, [config]);
+  }, []);
 
-  // Auto-fetch when config is set
-  React.useEffect(() => {
-    if (config?.repo && config?.token) {
-      fetchIssues();
-    }
-  }, [config, fetchIssues]);
+  const saveConfig = React.useCallback(
+    async (newConfig: GitHubConfig) => {
+      setConfig(newConfig);
+      if (newConfig.repo) {
+        await fetchIssuesForRepo(newConfig.repo);
+      }
+    },
+    [fetchIssuesForRepo]
+  );
+
+  const clearConfig = React.useCallback(() => {
+    setConfig(null);
+    setIssues([]);
+    setError(null);
+  }, []);
+
+  const fetchIssues = React.useCallback(async () => {
+    if (!config?.repo) return;
+    await fetchIssuesForRepo(config.repo);
+  }, [config, fetchIssuesForRepo]);
 
   return {
     config,
@@ -161,6 +100,6 @@ export function useGitHub() {
     saveConfig,
     clearConfig,
     fetchIssues,
-    isConfigured: !!(config?.repo && config?.token),
+    isConfigured: !!config?.repo,
   };
 }

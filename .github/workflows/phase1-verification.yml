@@ -1,0 +1,99 @@
+# Phase 1 independent CI verification.
+#
+# Runs the Phase 1 verification suite from a clean checkout:
+#   1. Vitest (tests)
+#   2. TypeScript (tsc --noEmit)
+#   3. ESLint (npm run lint)
+#   4. Next.js production build
+#
+# Each check runs as an independent job so every result is captured
+# regardless of the others. No step uses continue-on-error, || true,
+# or any other suppression mechanism — a failing check fails the
+# workflow. Pre-existing lint failures are preserved as evidence.
+#
+# ENCRYPTION_KEY is a non-secret test value (tests use the same
+# deterministic key); no production credentials are involved.
+
+name: Phase 1 Verification
+
+on:
+  pull_request:
+  push:
+    branches: [fix/phase1-security-remediation]
+
+concurrency:
+  group: phase1-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Vitest
+    runs-on: ubuntu-latest
+    env:
+      ENCRYPTION_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies (from lockfile)
+        run: npm ci
+
+      - name: Run tests
+        run: npx vitest run
+
+  typecheck:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies (from lockfile)
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+  lint:
+    name: ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies (from lockfile)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+  build:
+    name: Next.js build
+    runs-on: ubuntu-latest
+    env:
+      ENCRYPTION_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies (from lockfile)
+        run: npm ci
+
+      - name: Production build
+        run: npx next build

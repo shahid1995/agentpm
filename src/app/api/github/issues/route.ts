@@ -1,27 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
+import { successResponse, errorResponse, ApiError } from "../../../../lib/api/api-contract";
+import { githubIssuesRequestSchema } from "../../../../lib/api/schemas";
+import {
+  authenticate,
+  enforceRateLimit,
+  enforceRequestSize,
+} from "../../../../lib/api/security";
+import { CredentialService } from "../../../../lib/services/credential-service";
 
-export async function POST(request: NextRequest) {
+let credentialService: CredentialService | null = null;
+
+function getCredentialService(): CredentialService {
+  if (!credentialService) {
+    credentialService = new CredentialService();
+  }
+  return credentialService;
+}
+
+export async function POST(request: NextRequest): Promise<Response> {
   try {
+    // Phase 1 security boundary: auth → rate limit → size → validation
+    const user = await authenticate(request);
+    enforceRateLimit(`github-issues:${user.userId}`, "api");
+    await enforceRequestSize(request);
+
     const body = await request.json();
-    const { repo, token } = body;
-
-    if (!repo || !token) {
-      return NextResponse.json(
-        { error: "Missing repo or token" },
-        { status: 400 }
-      );
+    const result = githubIssuesRequestSchema.safeParse(body);
+    if (!result.success) {
+      throw new ApiError("VALIDATION_ERROR", "Invalid request", result.error.flatten());
     }
 
-    // Validate repo format
-    const rawRepo = repo.trim();
+    const rawRepo = result.data.repo.trim();
     if (!rawRepo.includes("/") || rawRepo.startsWith("/") || rawRepo.endsWith("/")) {
-      return NextResponse.json(
-        { error: "Invalid format: use 'owner/repo'" },
-        { status: 400 }
-      );
+      throw new ApiError("VALIDATION_ERROR", "Invalid format: use 'owner/repo'");
     }
 
-    // Encode path segments
+    // Resolve GitHub token from server-side encrypted credential
+    const token = await getCredentialService().getDecryptedCredential(user.userId, "github");
+    if (!token) {
+      throw new ApiError("NOT_FOUND", "GitHub credential not configured");
+    }
+
     const repoPath = rawRepo
       .split("/")
       .map((p: string) => encodeURIComponent(p.trim()))
@@ -32,7 +51,7 @@ export async function POST(request: NextRequest) {
     const response = await fetch(url, {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${token.trim()}`,
+        Authorization: `Bearer ${token}`,
         Accept: "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
       },
@@ -47,26 +66,28 @@ export async function POST(request: NextRequest) {
         // ignore
       }
       if (response.status === 404) {
-        errorMsg = `Repository '${rawRepo}' not found. Check the name is correct and token has 'repo' scope.`;
+        errorMsg = `Repository '${rawRepo}' not found`;
       }
       if (response.status === 401) {
-        errorMsg = `Authentication failed (401). Check your GitHub token is valid.`;
+        errorMsg = `Authentication failed (401)`;
       }
       if (response.status === 403) {
-        errorMsg = `Access denied (403). Token may lack 'repo' scope or rate limited.`;
+        errorMsg = `Access denied (403)`;
       }
-      return NextResponse.json({ error: errorMsg }, { status: response.status });
+      throw new ApiError("GITHUB_ERROR", errorMsg);
     }
 
     const data = await response.json();
-    // Filter out pull requests
     const issues = data.filter((item: { pull_request?: unknown }) => !item.pull_request);
 
-    return NextResponse.json({ issues });
+    return NextResponse.json(successResponse({ issues }));
   } catch (error) {
+    if (error instanceof ApiError) {
+      return error.toResponse();
+    }
     console.error("[AgentPM API] GitHub proxy error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      errorResponse("INTERNAL_ERROR", "Failed to fetch issues"),
       { status: 500 }
     );
   }

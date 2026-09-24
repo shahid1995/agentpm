@@ -16,6 +16,7 @@ import {
   extractSessionToken,
   CSRF_COOKIE_NAME,
 } from "../../lib/api/cookies";
+import { createUser, createProject, createProjectMember } from "../../lib/db/repositories";
 
 describe("Phase 1 Integration: Full Security Flow", () => {
   let authService: AuthService;
@@ -159,12 +160,17 @@ describe("Phase 1 Integration: Full Security Flow", () => {
       expect(authzService.canModifyProject(null)).toBe(false);
     });
 
-    it("should verify project membership correctly", () => {
-      const ownerCheck = authzService.checkProjectMembership("u1", "p1", "owner");
+    it("should verify project membership correctly", async () => {
+      // Membership must come from persisted database state
+      const user = await createUser(`authz-flow-${Date.now()}@test.com`, "hashed");
+      const project = await createProject("Authz Flow Project", null, user.id);
+      await createProjectMember(project.id, user.id, "owner");
+
+      const ownerCheck = await authzService.checkProjectMembership(user.id, project.id);
       expect(ownerCheck.isMember).toBe(true);
       expect(ownerCheck.role).toBe("owner");
 
-      const noMembership = authzService.checkProjectMembership("u1", "p1", null);
+      const noMembership = await authzService.checkProjectMembership("nonmember-id", project.id);
       expect(noMembership.isMember).toBe(false);
     });
   });
